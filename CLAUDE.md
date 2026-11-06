@@ -29,5 +29,7 @@ hermes --run-module unittest discover -s tests   # Hermes runtime: board + tools
 ## Verified facts (Hermes 0.23.0)
 
 - A tool handler's `session_id` kwarg is the **stored** session id (the `hermes --resume` id, e.g. `local-<hash>`), and `task_id` equals it in a top-level turn. Bind boards to it; the pane matches with `host.state.focusedStoredSessionId`. (Checked 2026-11-05 via `riff_ping` in a CLI turn and a Desktop turn on macOS — same `local-<hash>` stored id.)
+- Desktop runs a **copy** of `desktop/plugin.js` (`~/.hermes/desktop-plugins/riff-room/`), refreshed only on Rescan or app restart; a git or pip update leaves the old pane running against the new routes. A symlinked checkout hot-reloads. (Seen 2026-11-06 on the Mac: day-1 pane, "backend is off".)
+- Tool text must only promise pane controls that exist on this branch; the agent repeats it to the user verbatim.
 - Broadcasts from `hermes chat` reach no Desktop window (documented); only gateway-hosted turns and routes reach the pane.
 - Plugin routes on the local gateway reject unauthenticated curl (401) — test routes in-process, not over HTTP.
