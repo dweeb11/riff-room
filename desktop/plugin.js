@@ -1,94 +1,77 @@
 // riff-room desktop pane. Plain ESM, loaded uncompiled: jsx() calls only, SDK-only imports.
-// Day-1 skeleton: a diagnostic pane that settles the spec's VERIFY items
-// (session ids, plugin event delivery, host.composer.submit).
+// Interim pane (day 2): lists this chat's boards and shows the user's view of the latest one,
+// so the tools and routes can be checked end to end. The real board UI replaces it.
 
-import { atom, Button, host, useQuery, useValue, queryClient } from '@hermes/plugin-sdk'
+import { atom, host, queryClient, useQuery, useValue } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
 
 const ID = 'riff-room'
-const $events = atom([]) // last few plugin.riff-room.* events seen by this window
-const $restCtx = atom(null) // ctx.rest, captured at register()
-
+const $rest = atom(null) // ctx.rest, captured at register()
 const muted = 'text-(--ui-text-tertiary)'
 
-function Row({ label, value, ok }) {
+function Empty({ title, detail }) {
   return jsxs('div', {
-    className: 'flex gap-2 font-mono text-[0.6875rem]',
+    className: 'flex h-full flex-col gap-2 p-3 text-sm',
+    children: [jsx('div', { className: 'font-medium', children: title }), jsx('div', { className: muted, children: detail })]
+  })
+}
+
+function NoteRow({ note }) {
+  const text = note.text ?? '▒▒▒ face-down'
+  return jsxs('div', {
+    className: 'flex gap-2 text-[0.75rem]',
     children: [
-      jsx('span', { className: `w-28 shrink-0 ${muted}`, children: label }),
+      jsx('span', { className: `w-8 shrink-0 font-mono ${muted}`, children: note.id }),
       jsx('span', {
-        className: ok === false ? 'text-(--ui-yellow)' : ok ? 'text-(--ui-accent)' : '',
-        children: value ?? '—'
+        className: note.author === 'agent' ? 'text-(--ui-accent)' : '',
+        children: `${note.starred ? '★ ' : ''}${text}`
       })
     ]
   })
 }
 
-function VerifyPane() {
-  const rest = useValue($restCtx)
-  const runtimeId = useValue(host.state.focusedSessionId)
+function BoardPane() {
+  const rest = useValue($rest)
   const storedId = useValue(host.state.focusedStoredSessionId)
-  const events = useValue($events)
 
-  const verify = useQuery({
-    queryKey: [ID, 'verify'],
-    queryFn: () => rest('/verify'),
-    enabled: !!rest,
+  const list = useQuery({
+    queryKey: [ID, 'boards', storedId],
+    queryFn: () => rest(`/boards?session_id=${encodeURIComponent(storedId)}`),
+    enabled: !!rest && !!storedId,
+    refetchInterval: 3000,
+    retry: false
+  })
+  const boardId = list.data?.boards?.[0]?.id
+  const board = useQuery({
+    queryKey: [ID, 'board', boardId],
+    queryFn: () => rest(`/board/${boardId}`),
+    enabled: !!rest && !!boardId,
     refetchInterval: 3000,
     retry: false
   })
 
-  if (verify.isError) {
-    return jsxs('div', {
-      className: 'flex h-full flex-col gap-2 p-3 text-sm',
-      children: [
-        jsx('div', { className: 'font-medium', children: 'riff-room backend is off' }),
-        jsx('div', {
-          className: muted,
-          children: 'Enable the Python half (hermes plugins enable riff-room) and restart the gateway.'
-        })
-      ]
+  if (list.isError) {
+    return jsx(Empty, {
+      title: 'riff-room backend is off',
+      detail: 'Enable the Python half (hermes plugins enable riff-room) and restart the gateway.'
     })
   }
+  if (!storedId) return jsx(Empty, { title: 'riff-room', detail: 'Open a chat to see its board.' })
+  if (!boardId) return jsx(Empty, { title: 'No board in this chat', detail: 'Ask Hermes to start a riff on a topic.' })
 
-  const toolSid = verify.data?.last_tool_ping?.session_id
-  const match = toolSid ? (toolSid === storedId ? 'stored' : toolSid === runtimeId ? 'runtime' : 'neither') : null
-
-  const pingRoute = () =>
-    rest('/ping', { method: 'POST', body: { storedId, runtimeId } }).catch(e => host.notifyError(e, 'ping failed'))
-
-  const submitTest = () => {
-    const sent = host.composer.submit(storedId, 'riff-room day-1 check: please call the riff_ping tool once.')
-    host.notify({ kind: sent ? 'info' : 'warning', message: `composer.submit returned ${sent}` })
-  }
+  const b = board.data
+  if (!b) return jsx(Empty, { title: 'Loading…', detail: '' })
+  const round = b.rounds[b.rounds.length - 1]
 
   return jsxs('div', {
-    className: 'flex h-full flex-col gap-3 overflow-auto p-3 text-sm',
+    className: 'flex h-full flex-col gap-2 overflow-auto p-3 text-sm',
     children: [
-      jsx('div', { className: 'font-medium', children: 'riff-room · day-1 verify' }),
-      jsxs('div', {
-        className: 'flex flex-col gap-1',
-        children: [
-          jsx(Row, { label: 'pane stored id', value: storedId }),
-          jsx(Row, { label: 'pane runtime id', value: runtimeId }),
-          jsx(Row, { label: 'tool session_id', value: toolSid }),
-          jsx(Row, { label: 'tool id matches', value: match, ok: match ? match !== 'neither' : undefined })
-        ]
-      }),
-      jsxs('div', {
-        className: 'flex flex-wrap gap-2',
-        children: [
-          jsx(Button, { size: 'sm', variant: 'outline', onClick: pingRoute, children: 'Ping via route' }),
-          jsx(Button, { size: 'sm', variant: 'outline', onClick: submitTest, disabled: !storedId, children: 'Submit test message' })
-        ]
-      }),
-      jsx('div', { className: `text-[0.6875rem] ${muted}`, children: `events received (${events.length})` }),
+      jsx('div', { className: 'font-medium', children: b.topic }),
       jsx('div', {
-        className: 'flex flex-col gap-1',
-        children: events.map((e, i) =>
-          jsx(Row, { key: i, label: `${e.origin} ${e.seenAt}`, value: e.session_id ?? e.echo?.storedId ?? '' })
-        )
-      })
+        className: `text-[0.6875rem] ${muted}`,
+        children: `${b.id} · v${b.version} · ${round ? `round ${round.n} ${round.state}` : 'no rounds yet'} · ${b.notes.length} notes`
+      }),
+      ...b.notes.map(n => jsx(NoteRow, { key: n.id, note: n }))
     ]
   })
 }
@@ -97,12 +80,10 @@ export default {
   id: ID,
   name: 'riff-room',
   register(ctx) {
-    $restCtx.set((path, opts) => ctx.rest(path, opts))
+    $rest.set((path, opts) => ctx.rest(path, opts))
 
-    ctx.onEvent(`plugin.${ID}.ping`, ({ payload }) => {
-      const seenAt = new Date().toLocaleTimeString()
-      $events.set([{ ...payload, seenAt }, ...$events.get()].slice(0, 8))
-      queryClient.invalidateQueries({ queryKey: [ID, 'verify'] })
+    ctx.onEvent(`plugin.${ID}.board.changed`, () => {
+      queryClient.invalidateQueries({ queryKey: [ID] })
     })
 
     ctx.register({
@@ -110,7 +91,7 @@ export default {
       area: 'panes',
       title: 'riff-room',
       data: { placement: 'right', width: '380px' },
-      render: () => jsx(VerifyPane, {})
+      render: () => jsx(BoardPane, {})
     })
   }
 }
