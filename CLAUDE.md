@@ -21,3 +21,9 @@ hermes plugins doctor . --ci
 - **Never** assign into Hermes core modules or `sys.modules` (catalog rule 9; `no core override` check).
 - **Desktop pane**: plain ESM, `jsx()` calls (no JSX syntax); imports only `@hermes/plugin-sdk`, `react`, `react/jsx-runtime`; `ctx.setInterval` / `ctx.addEventListener` / `ctx.onEvent`, never bare globals; colours only via `var(--ui-*)`; clipboard via `ctx.os.writeClipboard`.
 - Live updates: `store.broadcast(event, payload)` → pane listens on `plugin.riff-room.<event>`; the pane must also poll, since events can drop.
+
+## Verified facts (Hermes 0.23.0)
+
+- A tool handler's `session_id` kwarg is the **stored** session id (the `hermes --resume` id, e.g. `local-<hash>`), and `task_id` equals it in a top-level turn. Bind boards to it; the pane matches with `host.state.focusedStoredSessionId`. (Checked 2026-11-05 via `riff_ping` in a CLI turn.)
+- Broadcasts from `hermes chat` reach no Desktop window (documented); only gateway-hosted turns and routes reach the pane.
+- Plugin routes on the local gateway reject unauthenticated curl (401) — test routes in-process, not over HTTP.
