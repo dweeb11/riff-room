@@ -1,0 +1,13 @@
+name: riff-room
+version: 0.0.1
+manifest_version: 2
+api_version: 1
+description: "Timed brainstorm rounds with Hermes as a teammate: face-down sticky notes, a shared timer, flip, sort, star, reel in."
+author: dweeb11
+license: MIT
+homepage: https://github.com/dweeb11/riff-room
+tags: [desktop, brainstorm, facilitation]
+requires_hermes: ">=0.23.0"
+provides_tools:
+  - riff_ping
+provides_hooks: []
