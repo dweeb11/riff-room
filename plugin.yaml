@@ -1,5 +1,5 @@
 name: riff-room
-version: 0.0.1
+version: 0.1.0
 manifest_version: 2
 api_version: 1
 description: "Timed brainstorm rounds with Hermes as a teammate: face-down sticky notes, a shared timer, flip, sort, star, reel in."
@@ -9,5 +9,10 @@ homepage: https://github.com/dweeb11/riff-room
 tags: [desktop, brainstorm, facilitation]
 requires_hermes: ">=0.23.0"
 provides_tools:
-  - riff_ping
+  - riff_new_board
+  - riff_add_notes
+  - riff_get_board
+  - riff_sort
+  - riff_reel_in
+  - riff_export
 provides_hooks: []
