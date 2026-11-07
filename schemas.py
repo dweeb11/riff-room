@@ -6,7 +6,7 @@ RIFF_NEW_BOARD = {
     "name": "riff_new_board",
     "description": (
         "Create a riff-room brainstorm board for this chat: a topic plus optional buckets "
-        "(columns to sort ideas into). The board shows in the riff-room pane. "
+        "(columns to sort ideas into). The user starts timed rounds from the riff-room pane. "
         "Use when the user wants to brainstorm or riff on something."
     ),
     "parameters": {

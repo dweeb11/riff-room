@@ -1,6 +1,6 @@
 # riff-room — agent notes
 
-Hermes plugin (unified package) for timed brainstorm rounds. Target: Hermes ≥ 0.23.0. Canonical API docs are in the local Hermes checkout: `~/.hermes/hermes-agent/website/docs/developer-guide/plugins/index.md` and `desktop-plugin-sdk.md`; catalog rules in `plugins/catalog-submission.md`.
+Hermes plugin (unified package) for timed brainstorm rounds. Target: Hermes ≥ 0.23.0. Canonical API docs are in the local Hermes checkout: `~/.hermes/hermes-agent/website/docs/developer-guide/plugins/index.md` and `developer-guide/desktop-plugin-sdk.md`; catalog rules in `plugins/catalog-submission.md`.
 
 ## Gate
 
@@ -22,7 +22,7 @@ hermes --run-module unittest discover -s tests   # Hermes runtime: board + tools
 - **Storage**: write only under `plugin_data_dir("riff-room")` (via `store.data_dir()`); atomic writes via `store.write_json`.
 - **`dashboard/plugin_api.py` is imported standalone**, not as part of the package — it loads `store.py` from the package root by path, and `store.py` loads `board.py` the same way. Shared modules must therefore use no relative imports. Two copies of a module can be live (package import + route import), so cross-call safety must come from the file system (file locks), not module-level locks.
 - **Never** assign into Hermes core modules or `sys.modules` (catalog rule 9; `no core override` check).
-- **Desktop pane**: plain ESM, `jsx()` calls (no JSX syntax); imports only `@hermes/plugin-sdk`, `react`, `react/jsx-runtime`; `ctx.setInterval` / `ctx.addEventListener` / `ctx.onEvent`, never bare globals; colours only via `var(--ui-*)`; clipboard via `ctx.os.writeClipboard`.
+- **Desktop pane**: plain ESM, `jsx()` calls (no JSX syntax); imports only `@hermes/plugin-sdk`, `react`, `react/jsx-runtime`; `ctx.setInterval` / `ctx.addEventListener` / `ctx.onEvent`, never bare globals; colours only via `var(--ui-*)`; clipboard via `ctx.os.writeClipboard`. Tailwind classes only work if the app's own source already uses them (its CSS is built without our file), so `className` holds only common utilities (`flex`, `gap-2`, `p-3`, `text-xs`); colours, tints and odd sizes go in inline `style` with `var(--ui-*)` / `color-mix()`.
 - **Never return a raw board** from a tool or route: always `board.view(b, viewer)` or `board.summary`. That is where the no-anchoring rule (face-down text hidden from the other author) lives.
 - Live updates: `store.broadcast(event, payload)` → pane listens on `plugin.riff-room.<event>`; the pane must also poll, since events can drop.
 

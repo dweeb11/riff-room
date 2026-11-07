@@ -26,7 +26,7 @@ def _handler(fn):
 def riff_new_board(args, session_id=None, **_):
     b = store.boards().create(args.get("topic"), args.get("buckets"), session_id=session_id)
     return {"board_id": b["id"], "topic": b["topic"], "buckets": b["buckets"],
-            "next": "Tell the user the board is in the riff-room pane."}
+            "next": "Tell the user the board is in the riff-room pane; they press Start there to begin a timed burst."}
 
 
 @_handler
