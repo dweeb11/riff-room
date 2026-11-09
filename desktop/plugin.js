@@ -25,6 +25,8 @@ import { jsx, jsxs } from 'react/jsx-runtime'
 
 const ID = 'riff-room'
 const PANE = `${ID}:pane` // contribution-scoped pane id, for host.revealPane
+const ROOM = `${ID}:room` // the main-area board (host.openWorkspace), docked above the chat
+const ROOM_PANE = `plugin-workspace:${ROOM}`
 const KICKOFF_MS = 60000 // how long "Hermes is setting up the board" shows after a start request
 const NOTE_MAX = 140
 const DURATIONS = [60, 180, 300]
@@ -41,12 +43,14 @@ let handled = new Set()
 let lastPulse = 0
 let audio = null
 let focusSeen = 0 // the last $focus request a field has answered
+let closeRoom = null // disposer for the main-area board, while it is open
 const $now = atom(Date.now())
 const $board = atom(null) // the board whose round this pane is timing
 const $muted = atom(false)
 const $duration = atom(180)
 const $focus = atom(0) // bumped to ask the pane's main field (note or topic) for the caret
 const $kickoff = atom(0) // when this window last asked Hermes to set up a board
+const $roomBoard = atom(null) // id of the board shown in the main area, if any
 
 const boardKey = id => [ID, 'board', id]
 const lastRound = b => b?.rounds?.[b.rounds.length - 1] ?? null
@@ -91,11 +95,30 @@ function submit(b, text) {
 
 const requestFocus = () => $focus.set($focus.get() + 1)
 
-// The launcher: bring the pane on screen (un-close, un-collapse, front its tab), then focus it.
+// The launcher: bring the board on screen (un-close, un-collapse, front its tab), then focus it.
 function openRoom() {
-  if (typeof host.revealPane === 'function') host.revealPane(PANE)
+  if (typeof host.revealPane === 'function') host.revealPane($roomBoard.get() ? ROOM_PANE : PANE)
   requestFocus()
 }
+
+// Move the board into the main area, above the chat, which stays live below it as a strip (chat
+// messages only reach a chat that is on screen). It stays until "Back to chat" or its tab's close.
+function openMain(b) {
+  if (typeof host.openWorkspace !== 'function') return // older desktop: the side pane carries on
+  const id = b.id
+  closeRoom = host.openWorkspace(ROOM, {
+    title: `Riff · ${b.topic}`,
+    dock: { pane: 'workspace', pos: 'top' },
+    render: () => jsx(Room, { boardId: id }),
+    onClose: () => {
+      closeRoom = null
+      $roomBoard.set(null)
+    }
+  })
+  $roomBoard.set(id)
+}
+
+const backToChat = () => closeRoom?.()
 
 // Ask Hermes, in the focused chat (or a fresh one), to set up a board; the pane picks it up by polling.
 function kickoff(sid, topic) {
@@ -186,6 +209,7 @@ async function startRound(b) {
   if (!res) return
   const v = put(res)
   lastPulse = 0
+  openMain(v)
   requestFocus()
   submit(v, `⏱ Round ${lastRound(v).n} burst started on '${v.topic}' (${clock(d)}). Add your face-down notes; mine go on the board, not in chat.`)
 }
@@ -252,7 +276,8 @@ function useFocusRequest(box) {
   useEffect(() => {
     if (tick <= focusSeen) return
     focusSeen = tick
-    box.current?.querySelector('input')?.focus()
+    // A beat later, so a pane the host just revealed doesn't take the caret back.
+    ctx.setTimeout(() => box.current?.querySelector('input')?.focus(), 60)
   }, [tick])
 }
 
@@ -312,7 +337,7 @@ function Menu({ b, running }) {
   })
 }
 
-function Header({ b, r, running, boards, onPick, offline }) {
+function Header({ b, r, running, boards, onPick, offline, inRoom }) {
   const duration = useValue($duration)
   const [busy, run] = useBusy()
   return jsxs('div', {
@@ -337,6 +362,14 @@ function Header({ b, r, running, boards, onPick, offline }) {
           running
             ? jsx(Button, { size: 'xs', variant: 'secondary', disabled: busy, onClick: run(() => endRound(b)), children: 'End' })
             : jsx(Button, { size: 'xs', disabled: busy, onClick: run(() => startRound(b)), children: 'Start' }),
+          inRoom &&
+            jsx(Button, {
+              size: 'xs',
+              variant: 'ghost',
+              title: 'Put the board back in the side pane',
+              onClick: backToChat,
+              children: 'Back to chat'
+            }),
           jsx(Menu, { b, running })
         ]
       }),
@@ -587,7 +620,7 @@ function Launcher() {
   })
 }
 
-function Board({ b, boards, onPick, offline }) {
+function Board({ b, boards, onPick, offline, inRoom = false }) {
   const r = lastRound(b)
   const running = r?.state === 'running'
   const live = b.notes.filter(n => !n.dimmed)
@@ -598,7 +631,7 @@ function Board({ b, boards, onPick, offline }) {
     style: { minHeight: 0 },
     onPointerDown: () => !$muted.get() && running && audioCtx(), // re-arm sound after an app restart
     children: [
-      jsx(Header, { b, r, running, boards, onPick, offline }),
+      jsx(Header, { b, r, running, boards, onPick, offline, inRoom }),
       jsx(Composer, { b, running, fresh }),
       jsxs('div', {
         className: 'flex flex-col gap-2 overflow-auto',
@@ -628,7 +661,48 @@ function BoardPane() {
   })
   const boards = list.data?.boards ?? []
   const boardId = boards.some(x => x.id === pick) ? pick : boards[0]?.id
-  const board = useQuery({
+  const board = useBoard(boardId)
+  const roomId = useValue($roomBoard)
+
+  if (!storedId) return jsx(StartForm, { sid: null })
+  if (list.isError && !list.data) {
+    return jsx(Empty, {
+      title: 'riff-room backend is off',
+      detail: 'Enable the Python half (hermes plugins enable riff-room) and restart the gateway.'
+    })
+  }
+  if (!list.data) return jsx(Empty, { title: 'riff-room', detail: 'Loading…' })
+  if (!boardId) return jsx(StartForm, { sid: storedId })
+  if (roomId && roomId === boardId) {
+    return jsxs('div', {
+      className: 'flex flex-col gap-2 p-3 text-sm',
+      children: [
+        jsx('div', { className: 'font-medium', children: 'The board is open above the chat' }),
+        jsxs('div', {
+          className: 'flex items-center gap-2',
+          children: [
+            jsx(Button, { size: 'xs', variant: 'secondary', onClick: openRoom, children: 'Go to it' }),
+            jsx(Button, { size: 'xs', variant: 'ghost', onClick: backToChat, children: 'Bring it back here' })
+          ]
+        })
+      ]
+    })
+  }
+  if (!board.data) return jsx(Empty, { title: 'riff-room', detail: board.isError ? 'Could not load the board.' : 'Loading…' })
+  return jsx(Board, { b: board.data, boards, onPick: setPick, offline: list.isError || board.isError })
+}
+
+// The board in the main area. Bound to the board, not the focused chat: clicking into it or the
+// chat strip below can move focus without changing which board this is.
+function Room({ boardId }) {
+  const board = useBoard(boardId)
+  if (!board.data) return jsx(Empty, { title: 'riff-room', detail: board.isError ? 'Could not load the board.' : 'Loading…' })
+  return jsx(Board, { b: board.data, boards: [], onPick: () => {}, offline: board.isError, inRoom: true })
+}
+
+// One cache entry per board, shared by the side pane and the main-area board.
+function useBoard(boardId) {
+  return useQuery({
     queryKey: boardKey(boardId),
     queryFn: () =>
       ctx.rest(`/board/${boardId}`).then(b => {
@@ -640,18 +714,6 @@ function BoardPane() {
     refetchInterval: 2000, // card backs trickle in by reveal_at, which no event announces
     retry: false
   })
-
-  if (!storedId) return jsx(StartForm, { sid: null })
-  if (list.isError && !list.data) {
-    return jsx(Empty, {
-      title: 'riff-room backend is off',
-      detail: 'Enable the Python half (hermes plugins enable riff-room) and restart the gateway.'
-    })
-  }
-  if (!list.data) return jsx(Empty, { title: 'riff-room', detail: 'Loading…' })
-  if (!boardId) return jsx(StartForm, { sid: storedId })
-  if (!board.data) return jsx(Empty, { title: 'riff-room', detail: board.isError ? 'Could not load the board.' : 'Loading…' })
-  return jsx(Board, { b: board.data, boards, onPick: setPick, offline: list.isError || board.isError })
 }
 
 export default {
@@ -665,8 +727,10 @@ export default {
     lastPulse = 0
     audio = null
     focusSeen = 0
+    closeRoom = null
     $focus.set(0)
     $kickoff.set(0)
+    $roomBoard.set(null)
     $board.set(null)
     $muted.set(!!c.storage.get('muted', false))
     const d = c.storage.get('duration', 180)
@@ -676,6 +740,7 @@ export default {
     c.onDispose(() => {
       audio?.close().catch(() => {})
       audio = null
+      closeRoom?.() // the host registers the main-area board outside ctx, so close it ourselves
     })
     c.onEvent(`plugin.${ID}.board.changed`, () => {
       queryClient.invalidateQueries({ queryKey: [ID] })
