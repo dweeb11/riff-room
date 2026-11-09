@@ -93,6 +93,15 @@ class TestToolsAndRoutes(unittest.TestCase):
         self.assertTrue(changed and all(p["board_id"] == bid for p in changed))
         self.assertEqual([p["version"] for p in changed], sorted({p["version"] for p in changed}))
 
+    def test_pane_note_is_one_user_note(self):
+        bid = self.tool("riff_new_board", {"topic": "entry"}, session_id="local-s1")["board_id"]
+        self.http("POST", f"/board/{bid}/round/start", json={"duration_s": 60})
+        res = self.http("POST", f"/board/{bid}/notes", json={"text": "mine"}).json()
+        self.assertEqual(res["added"]["author"], "user")
+        self.assertEqual([(n["author"], n["text"]) for n in res["board"]["notes"]], [("user", "mine")])
+        self.assertTrue(res["board"]["notes"][0]["face_down"])
+        self.assertEqual(self.http("POST", f"/board/{bid}/notes", json={"text": "  "}).status_code, 400)
+
     def test_errors_are_json_never_raised(self):
         self.assertIn("error", self.tool("riff_get_board", {"board_id": "../../etc/passwd"}))
         self.assertIn("error", self.tool("riff_add_notes", {"board_id": "b_00000000", "notes": [{"text": "x"}]}))

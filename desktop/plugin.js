@@ -2,6 +2,7 @@
 // Shows the focused chat's board: a burst timer with pulse and chime, face-down cards,
 // flip, stars, drag-sort between buckets, and a note composer that posts to the board.
 // The timer is server-authoritative (round.ends_at); the pane only counts down to it.
+// A title-bar "Riff" button and a ⌘K command reveal the pane and put the caret in it.
 
 import {
   atom,
@@ -13,14 +14,18 @@ import {
   host,
   icons,
   Input,
+  PALETTE_AREA,
   queryClient,
+  TITLEBAR_AREAS,
   useQuery,
   useValue
 } from '@hermes/plugin-sdk'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
 
 const ID = 'riff-room'
+const PANE = `${ID}:pane` // contribution-scoped pane id, for host.revealPane
+const KICKOFF_MS = 60000 // how long "Hermes is setting up the board" shows after a start request
 const NOTE_MAX = 140
 const DURATIONS = [60, 180, 300]
 const URGENT_MS = 30000 // the pulse speeds up in the last 30 s
@@ -35,10 +40,13 @@ let flipAsked = new Set()
 let handled = new Set()
 let lastPulse = 0
 let audio = null
+let focusSeen = 0 // the last $focus request a field has answered
 const $now = atom(Date.now())
 const $board = atom(null) // the board whose round this pane is timing
 const $muted = atom(false)
 const $duration = atom(180)
+const $focus = atom(0) // bumped to ask the pane's main field (note or topic) for the caret
+const $kickoff = atom(0) // when this window last asked Hermes to set up a board
 
 const boardKey = id => [ID, 'board', id]
 const lastRound = b => b?.rounds?.[b.rounds.length - 1] ?? null
@@ -79,6 +87,24 @@ function submit(b, text) {
   if (!host.composer.submit(b.session_id, text)) {
     host.notify({ kind: 'warning', message: "Open the board's chat so Hermes hears about it." })
   }
+}
+
+const requestFocus = () => $focus.set($focus.get() + 1)
+
+// The launcher: bring the pane on screen (un-close, un-collapse, front its tab), then focus it.
+function openRoom() {
+  if (typeof host.revealPane === 'function') host.revealPane(PANE)
+  requestFocus()
+}
+
+// Ask Hermes, in the focused chat (or a fresh one), to set up a board; the pane picks it up by polling.
+function kickoff(sid, topic) {
+  if (!host.composer.submit(sid ?? 'new', `Let's riff on "${topic}". Set up a riff-room board for it.`)) {
+    host.notify({ kind: 'warning', message: 'Open a chat first, then start the riff.' })
+    return false
+  }
+  $kickoff.set(Date.now())
+  return true
 }
 
 // ── audio: all generated, no files ──────────────────────────────────────────
@@ -160,7 +186,8 @@ async function startRound(b) {
   if (!res) return
   const v = put(res)
   lastPulse = 0
-  submit(v, `⏱ Round ${lastRound(v).n} burst started on '${v.topic}' (${clock(d)}). Add your face-down notes.`)
+  requestFocus()
+  submit(v, `⏱ Round ${lastRound(v).n} burst started on '${v.topic}' (${clock(d)}). Add your face-down notes; mine go on the board, not in chat.`)
 }
 
 async function endRound(b) {
@@ -217,6 +244,34 @@ function useBusy() {
     }
   }
   return [busy, run]
+}
+
+// Answer each focus request once, whenever the field mounts or the request arrives.
+function useFocusRequest(box) {
+  const tick = useValue($focus)
+  useEffect(() => {
+    if (tick <= focusSeen) return
+    focusSeen = tick
+    box.current?.querySelector('input')?.focus()
+  }, [tick])
+}
+
+// A slow breathing ring around the note field; a static ring for reduced motion.
+const RING = pct => `0 0 0 2px color-mix(in srgb, var(--ui-accent) ${pct}%, transparent)`
+const WIDE = pct => `0 0 0 5px color-mix(in srgb, var(--ui-accent) ${pct}%, transparent)`
+
+function useGlow(box, on) {
+  useEffect(() => {
+    const el = box.current
+    if (!on || !el || globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    const anim = el.animate([{ boxShadow: RING(70) }, { boxShadow: WIDE(20) }], {
+      duration: 1400,
+      direction: 'alternate',
+      easing: 'ease-in-out',
+      iterations: Infinity
+    })
+    return () => anim.cancel()
+  }, [on])
 }
 
 function Empty({ title, detail }) {
@@ -410,34 +465,125 @@ function Section({ b, title, bucket, notes, hint }) {
   })
 }
 
-function Composer({ b, running }) {
+// The user's note field. `fresh` = they have no note on this board yet: until their first one
+// lands, the pane explains notes vs chat (between bursts) or rings the field (during a burst).
+function Composer({ b, running, fresh }) {
   const [text, setText] = useState('')
+  const box = useRef(null)
+  useFocusRequest(box)
+  useGlow(box, running && fresh)
   const send = async () => {
     const t = text.trim()
     if (!t) return
-    setText('')
+    setText('') // a second Enter before the reply finds an empty field, so one press adds one note
     const res = await call(`/board/${b.id}/notes`, 'Note not added', { body: { text: t } })
     if (res) put(res.board)
     else setText(t)
   }
   return jsxs('div', {
-    className: 'flex items-center gap-2 p-3',
-    style: { borderTop: '1px solid var(--ui-stroke-tertiary)' },
+    className: 'flex flex-col gap-2 p-3',
+    style: { borderBottom: '1px solid var(--ui-stroke-tertiary)' },
     children: [
-      jsx(Input, {
-        value: text,
-        maxLength: NOTE_MAX,
-        placeholder: running ? 'Face-down note, Enter' : 'Add a note, Enter',
-        onChange: e => setText(e.target.value),
-        onKeyDown: e => {
-          if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-            e.preventDefault()
-            send()
-          }
-        }
+      jsxs('div', {
+        className: 'flex items-center gap-2 text-xs',
+        children: [
+          jsx('span', { className: 'font-medium', children: 'Your ideas' }),
+          jsx('div', { style: { flex: 1 } }),
+          jsx('span', {
+            style: running ? { color: 'var(--ui-text-secondary)' } : muted,
+            children: running ? 'Enter adds a note · hidden from Hermes until the flip' : 'Enter adds a note'
+          })
+        ]
       }),
-      text.length > 100 && jsx('span', { className: 'text-xs', style: muted, children: NOTE_MAX - text.length })
+      jsxs('div', {
+        ref: box,
+        className: 'flex items-center gap-2',
+        style: { borderRadius: 8, boxShadow: running && fresh ? RING(70) : undefined },
+        children: [
+          jsx(Input, {
+            value: text,
+            maxLength: NOTE_MAX,
+            placeholder: running ? 'Type an idea, press Enter' : 'Add a note, press Enter',
+            onChange: e => setText(e.target.value),
+            onKeyDown: e => {
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                e.preventDefault()
+                send()
+              }
+            }
+          }),
+          text.length > 100 && jsx('span', { className: 'text-xs', style: muted, children: NOTE_MAX - text.length })
+        ]
+      }),
+      !running &&
+        fresh &&
+        jsx('div', {
+          className: 'text-xs',
+          style: {
+            ...muted,
+            padding: '6px 8px',
+            borderRadius: 6,
+            background: 'color-mix(in srgb, var(--ui-accent) 7%, transparent)'
+          },
+          children:
+            'Put your ideas here, one per note, not in chat. During a burst they stay face-down, hidden from Hermes until the flip, so neither of you anchors on the other. Chat is for talking it over.'
+        })
     ]
+  })
+}
+
+// No board yet: name a topic and Hermes sets one up in this chat (or a new one).
+function StartForm({ sid }) {
+  const [topic, setTopic] = useState('')
+  const box = useRef(null)
+  useFocusRequest(box)
+  const at = useValue($kickoff)
+  useValue($now)
+  const waiting = Date.now() - at < KICKOFF_MS
+  const go = () => {
+    const t = topic.trim()
+    if (t && kickoff(sid, t)) setTopic('')
+  }
+  return jsxs('div', {
+    className: 'flex flex-col gap-2 p-3 text-sm',
+    children: [
+      jsx('div', { className: 'font-medium', children: 'Start a riff' }),
+      jsx('div', {
+        className: 'text-xs',
+        style: muted,
+        children: 'Name a topic and Hermes sets up a board here. Then press Start for a timed burst: you both write ideas face-down, and they all flip at time’s up.'
+      }),
+      jsxs('div', {
+        ref: box,
+        className: 'flex items-center gap-2',
+        children: [
+          jsx(Input, {
+            value: topic,
+            maxLength: 200,
+            placeholder: 'What do you want to riff on?',
+            onChange: e => setTopic(e.target.value),
+            onKeyDown: e => {
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                e.preventDefault()
+                go()
+              }
+            }
+          }),
+          jsx(Button, { size: 'xs', disabled: !topic.trim(), onClick: go, children: 'Start a riff' })
+        ]
+      }),
+      waiting && jsx('div', { className: 'text-xs', style: muted, children: 'Asked Hermes in chat; the board appears here in a moment…' })
+    ]
+  })
+}
+
+function Launcher() {
+  return jsxs(Button, {
+    size: 'xs',
+    variant: 'ghost',
+    title: 'Open the riff-room board',
+    onClick: openRoom,
+    children: [jsx(icons.Brain, { size: 14 }), 'Riff']
   })
 }
 
@@ -446,15 +592,17 @@ function Board({ b, boards, onPick, offline }) {
   const running = r?.state === 'running'
   const live = b.notes.filter(n => !n.dimmed)
   const parked = b.notes.filter(n => n.dimmed)
+  const fresh = !b.notes.some(n => n.author === 'user')
   return jsxs('div', {
     className: 'flex h-full flex-col text-sm',
     style: { minHeight: 0 },
     onPointerDown: () => !$muted.get() && running && audioCtx(), // re-arm sound after an app restart
     children: [
       jsx(Header, { b, r, running, boards, onPick, offline }),
+      jsx(Composer, { b, running, fresh }),
       jsxs('div', {
         className: 'flex flex-col gap-2 overflow-auto',
-        style: { flex: 1, minHeight: 0, padding: '0 6px 6px' },
+        style: { flex: 1, minHeight: 0, padding: '6px' },
         children: [
           jsx(Section, { b, title: 'Unsorted', bucket: null, notes: live.filter(n => !n.bucket), hint: 'New notes land here.' }),
           ...b.buckets.map(k =>
@@ -462,8 +610,7 @@ function Board({ b, boards, onPick, offline }) {
           ),
           parked.length > 0 && jsx(Section, { b, title: 'Parked', notes: parked }, 'parked')
         ]
-      }),
-      jsx(Composer, { b, running })
+      })
     ]
   })
 }
@@ -494,7 +641,7 @@ function BoardPane() {
     retry: false
   })
 
-  if (!storedId) return jsx(Empty, { title: 'riff-room', detail: 'Open a chat to see its board.' })
+  if (!storedId) return jsx(StartForm, { sid: null })
   if (list.isError && !list.data) {
     return jsx(Empty, {
       title: 'riff-room backend is off',
@@ -502,7 +649,7 @@ function BoardPane() {
     })
   }
   if (!list.data) return jsx(Empty, { title: 'riff-room', detail: 'Loading…' })
-  if (!boardId) return jsx(Empty, { title: 'No board in this chat', detail: 'Ask Hermes to start a riff on a topic.' })
+  if (!boardId) return jsx(StartForm, { sid: storedId })
   if (!board.data) return jsx(Empty, { title: 'riff-room', detail: board.isError ? 'Could not load the board.' : 'Loading…' })
   return jsx(Board, { b: board.data, boards, onPick: setPick, offline: list.isError || board.isError })
 }
@@ -517,6 +664,9 @@ export default {
     handled = new Set()
     lastPulse = 0
     audio = null
+    focusSeen = 0
+    $focus.set(0)
+    $kickoff.set(0)
     $board.set(null)
     $muted.set(!!c.storage.get('muted', false))
     const d = c.storage.get('duration', 180)
@@ -531,12 +681,25 @@ export default {
       queryClient.invalidateQueries({ queryKey: [ID] })
     })
 
-    c.register({
-      id: 'pane',
-      area: 'panes',
-      title: 'riff-room',
-      data: { placement: 'right', width: '380px' },
-      render: () => jsx(BoardPane, {})
-    })
+    c.registerMany([
+      {
+        id: 'pane',
+        area: 'panes',
+        title: 'riff-room',
+        data: { placement: 'right', width: '380px' },
+        render: () => jsx(BoardPane, {})
+      },
+      { id: 'launcher', area: TITLEBAR_AREAS.right, render: () => jsx(Launcher, {}) },
+      {
+        id: 'open',
+        area: PALETTE_AREA,
+        data: {
+          id: `${ID}.open`,
+          label: 'Riff: open the brainstorm board',
+          keywords: ['riff', 'brainstorm', 'sticky', 'notes', 'ideas'],
+          run: openRoom
+        }
+      }
+    ])
   }
 }

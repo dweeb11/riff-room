@@ -7,7 +7,8 @@ RIFF_NEW_BOARD = {
     "description": (
         "Create a riff-room brainstorm board for this chat: a topic plus optional buckets "
         "(columns to sort ideas into). The user starts timed rounds from the riff-room pane. "
-        "Use when the user wants to brainstorm or riff on something."
+        "Use when the user wants to brainstorm or riff on something, including when the pane "
+        "sends \"Let's riff on ...\" for them."
     ),
     "parameters": {
         "type": "object",
@@ -27,7 +28,9 @@ RIFF_ADD_NOTES = {
         "running burst they go in face-down and their card backs trickle onto the board; the "
         "user's face-down notes stay hidden from you until the flip, so write without waiting "
         "for theirs. After the flip, add one or two ideas at a time and link a note that builds "
-        "on another with spark_of."
+        "on another with spark_of. Only your own ideas: never add the user's ideas from chat "
+        "as your notes. If they type ideas in chat, ask them to put them in the pane's note "
+        "field instead (Enter adds one), where they count as theirs."
     ),
     "parameters": {
         "type": "object",
