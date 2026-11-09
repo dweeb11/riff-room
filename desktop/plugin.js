@@ -1,6 +1,7 @@
 // riff-room desktop pane. Plain ESM, loaded uncompiled: jsx() calls only, SDK-only imports.
 // Shows the focused chat's board: a burst timer with pulse and chime, face-down cards,
 // flip, stars, drag-sort between buckets, and a note composer that posts to the board.
+// After a flip, "Reel it in" asks Hermes (in chat) for the map, which the pane then shows.
 // The timer is server-authoritative (round.ends_at); the pane only counts down to it.
 // A title-bar "Riff" button and a ⌘K command reveal the pane and put the caret in it.
 
@@ -28,6 +29,7 @@ const PANE = `${ID}:pane` // contribution-scoped pane id, for host.revealPane
 const ROOM = `${ID}:room` // the main-area board (host.openWorkspace), docked above the chat
 const ROOM_PANE = `plugin-workspace:${ROOM}`
 const KICKOFF_MS = 60000 // how long "Hermes is setting up the board" shows after a start request
+const REEL_WAIT_MS = 120000 // how long "Asked Hermes to reel it in" shows while no new map lands
 const NOTE_MAX = 140
 const DURATIONS = [60, 180, 300]
 const URGENT_MS = 30000 // the pulse speeds up in the last 30 s
@@ -51,6 +53,7 @@ const $duration = atom(180)
 const $focus = atom(0) // bumped to ask the pane's main field (note or topic) for the caret
 const $kickoff = atom(0) // when this window last asked Hermes to set up a board
 const $roomBoard = atom(null) // id of the board shown in the main area, if any
+const $reelAsk = atom(null) // { id, prevAt, t }: this window asked Hermes to reel in board `id`
 
 const boardKey = id => [ID, 'board', id]
 const lastRound = b => b?.rounds?.[b.rounds.length - 1] ?? null
@@ -128,6 +131,18 @@ function kickoff(sid, topic) {
   }
   $kickoff.set(Date.now())
   return true
+}
+
+// Reeling in takes judgment (clusters, heat, a next step), so Hermes does it; the button only asks.
+function reelIn(b) {
+  submit(b, `🎣 Reel it in: map '${b.topic}' into named clusters, pick the notes with the most heat, and give one concrete next step.`)
+  $reelAsk.set({ id: b.id, prevAt: b.reel?.at ?? null, t: Date.now() })
+}
+
+// Waiting for the map this window asked for: until a new one lands, or REEL_WAIT_MS passes.
+function reelPending(b) {
+  const ask = $reelAsk.get()
+  return !!ask && ask.id === b.id && (b.reel?.at ?? null) === ask.prevAt && Date.now() - ask.t < REEL_WAIT_MS
 }
 
 // ── audio: all generated, no files ──────────────────────────────────────────
@@ -337,9 +352,13 @@ function Menu({ b, running }) {
   })
 }
 
-function Header({ b, r, running, boards, onPick, offline, inRoom }) {
+function Header({ b, r, running, boards, onPick, offline, inRoom, showMap, setShowMap }) {
   const duration = useValue($duration)
   const [busy, run] = useBusy()
+  useValue($reelAsk)
+  useValue($now)
+  const reeling = reelPending(b)
+  const canReel = r?.state === 'flipped' && b.notes.some(n => n.text != null)
   return jsxs('div', {
     className: 'flex flex-col gap-2 p-3',
     children: [
@@ -354,6 +373,7 @@ function Header({ b, r, running, boards, onPick, offline, inRoom }) {
       jsx('div', { className: 'font-medium', style: { wordBreak: 'break-word' }, children: b.topic }),
       jsxs('div', {
         className: 'flex items-center gap-2',
+        style: { flexWrap: 'wrap' },
         children: [
           jsx(RoundChip, { b, r }),
           jsx('div', { style: { flex: 1 } }),
@@ -362,6 +382,24 @@ function Header({ b, r, running, boards, onPick, offline, inRoom }) {
           running
             ? jsx(Button, { size: 'xs', variant: 'secondary', disabled: busy, onClick: run(() => endRound(b)), children: 'End' })
             : jsx(Button, { size: 'xs', disabled: busy, onClick: run(() => startRound(b)), children: 'Start' }),
+          !running &&
+            jsx(Button, {
+              size: 'xs',
+              variant: 'secondary',
+              disabled: !canReel || reeling,
+              title: canReel ? 'Ask Hermes for the map: clusters, the hottest notes, one next step' : 'Available after a round flips',
+              onClick: () => reelIn(b),
+              children: b.reel ? 'Reel in again' : 'Reel it in'
+            }),
+          !running &&
+            b.reel &&
+            jsx(Button, {
+              size: 'xs',
+              variant: 'ghost',
+              title: showMap ? 'Show the board' : 'Show the reel-in map',
+              onClick: () => setShowMap(!showMap),
+              children: showMap ? 'Board' : 'Map'
+            }),
           inRoom &&
             jsx(Button, {
               size: 'xs',
@@ -373,6 +411,7 @@ function Header({ b, r, running, boards, onPick, offline, inRoom }) {
           jsx(Menu, { b, running })
         ]
       }),
+      reeling && jsx('div', { className: 'text-xs', style: muted, children: 'Asked Hermes in chat to reel it in; the map appears here when it’s done…' }),
       offline && jsx('div', { className: 'text-xs', style: muted, children: 'Reconnecting…' })
     ]
   })
@@ -645,6 +684,56 @@ function StartForm({ sid }) {
   })
 }
 
+// The reel-in map: the one next step first, then the hottest notes, then the clusters.
+function MapView({ b }) {
+  const byId = new Map(b.notes.filter(n => n.text != null).map(n => [n.id, n]))
+  const pick = ids => ids.map(id => byId.get(id)).filter(Boolean)
+  const grid = notes =>
+    jsx('div', {
+      style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 6 },
+      children: notes.map(n => jsx(Card, { b, n }, n.id))
+    })
+  const group = (title, notes, key) =>
+    notes.length > 0 &&
+    jsxs(
+      'section',
+      {
+        style: { padding: 6 },
+        children: [
+          jsxs('div', {
+            className: 'flex items-center gap-2 text-xs',
+            style: { ...muted, marginBottom: 4 },
+            children: [jsx('span', { className: 'font-medium', children: title }), jsx('span', { children: notes.length })]
+          }),
+          grid(notes)
+        ]
+      },
+      key
+    )
+  const heat = pick(b.reel.heat_note_ids)
+  return jsxs('div', {
+    className: 'flex flex-col gap-2 overflow-auto',
+    style: { flex: 1, minHeight: 0, padding: 6 },
+    children: [
+      jsxs('div', {
+        style: {
+          margin: 6,
+          padding: '10px 12px',
+          borderRadius: 8,
+          background: 'color-mix(in srgb, var(--ui-accent) 10%, transparent)',
+          boxShadow: 'inset 3px 0 0 var(--ui-accent)'
+        },
+        children: [
+          jsx('div', { className: 'text-xs font-medium', style: { color: 'var(--ui-accent)', marginBottom: 4 }, children: 'Next step' }),
+          jsx('div', { style: { color: 'var(--ui-text-primary)', wordBreak: 'break-word' }, children: b.reel.next_step })
+        ]
+      }),
+      group('Most heat', heat, 'heat'),
+      ...b.reel.clusters.map((c, i) => group(c.name, pick(c.note_ids), `c${i}`))
+    ]
+  })
+}
+
 function Launcher() {
   return jsxs(Button, {
     size: 'xs',
@@ -661,14 +750,22 @@ function Board({ b, boards, onPick, offline, inRoom = false }) {
   const live = b.notes.filter(n => !n.dimmed)
   const parked = b.notes.filter(n => n.dimmed)
   const fresh = !b.notes.some(n => n.author === 'user')
+  // The map shows by default when it is newer than the last round; the Map/Board toggle overrides
+  // that until the map or the round changes. A running round always shows the board.
+  const [choice, setChoice] = useState(null)
+  const mapKey = `${b.reel?.at}|${r?.n}`
+  const newMap = !!b.reel && (!r || Date.parse(b.reel.at) > Date.parse(r.started_at))
+  const showMap = !!b.reel && !running && (choice?.key === mapKey ? choice.map : newMap)
+  const setShowMap = map => setChoice({ key: mapKey, map })
   return jsxs('div', {
     className: 'flex h-full flex-col text-sm',
     style: { minHeight: 0 },
     onPointerDown: () => !$muted.get() && running && audioCtx(), // re-arm sound after an app restart
     children: [
-      jsx(Header, { b, r, running, boards, onPick, offline, inRoom }),
+      jsx(Header, { b, r, running, boards, onPick, offline, inRoom, showMap, setShowMap }),
       jsx(Composer, { b, running, fresh }),
-      jsxs('div', {
+      showMap && jsx(MapView, { b }),
+      !showMap && jsxs('div', {
         className: 'flex flex-col gap-2 overflow-auto',
         style: { flex: 1, minHeight: 0, padding: '6px' },
         children: [
@@ -766,6 +863,7 @@ export default {
     $focus.set(0)
     $kickoff.set(0)
     $roomBoard.set(null)
+    $reelAsk.set(null)
     $board.set(null)
     $muted.set(!!c.storage.get('muted', false))
     const d = c.storage.get('duration', 180)

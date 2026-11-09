@@ -10,10 +10,10 @@ A unified Hermes plugin: six agent tools (Python), backend routes (`dashboard/pl
 
 - **Agent tools:** `riff_new_board`, `riff_add_notes`, `riff_get_board`, `riff_sort`, `riff_reel_in`, `riff_export`.
 - **Launcher:** a **Riff** button in the title bar (and "Riff: open the brainstorm board" in ⌘K) opens the pane and puts the caret in it. With no board yet, the pane asks for a topic and Hermes sets one up.
-- **Pane:** burst timer with a chime at time's up, face-down cards that flip, stars, drag-sort into buckets, a note field at the top that is open only during a burst (highlighted until your first note on a board; an idea still being typed at time's up can be added or discarded), and markdown export. Pressing Start moves the board into the main area above the chat, which stays live below it as a strip; **Back to chat** (or closing the tab) puts it back in the side pane.
+- **Pane:** burst timer with a chime at time's up, face-down cards that flip, stars, drag-sort into buckets, a note field at the top that is open only during a burst (highlighted until your first note on a board; an idea still being typed at time's up can be added or discarded), a **Reel it in** button after a flip (it asks Hermes in chat; the map then shows in the pane: the next step, the notes with the most heat, and the named clusters, with a Map/Board toggle), and markdown export. Pressing Start moves the board into the main area above the chat, which stays live below it as a strip; **Back to chat** (or closing the tab) puts it back in the side pane.
 - **No anchoring:** during a burst, neither side sees the other's note text until the flip.
 
-Not built yet: the reel-in map view in the pane, and a hook that tells the agent when a round flips (today it only knows the board's state when it calls `riff_get_board`).
+Not built yet: a hook that tells the agent when a round flips. Today the pane posts a time's-up message to the board's chat when that chat is open; otherwise the agent only learns of the flip when it calls `riff_get_board`.
 
 ## Develop
 
