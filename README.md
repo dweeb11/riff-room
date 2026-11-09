@@ -4,7 +4,7 @@ Timed brainstorm rounds with Hermes as a teammate. You and the agent write stick
 
 A unified Hermes plugin: six agent tools (Python), backend routes (`dashboard/plugin_api.py`), and a Desktop pane (`desktop/plugin.js`).
 
-> Status: early. The full round works in code and tests, but has not yet been played end to end in Desktop.
+> Status: early. The full round, including the launch-to-first-note flow (launcher, board above chat, burst-only note field), has been played in Desktop.
 
 ## What's in it
 
