@@ -30,7 +30,8 @@ RIFF_ADD_NOTES = {
         "for theirs. After the flip, add one or two ideas at a time and link a note that builds "
         "on another with spark_of. Only your own ideas: never add the user's ideas from chat "
         "as your notes. If they type ideas in chat, ask them to put them in the pane's note "
-        "field instead (Enter adds one), where they count as theirs."
+        "field instead, where they count as theirs: it opens during a burst (they press Start "
+        "in the pane) and Enter adds a note."
     ),
     "parameters": {
         "type": "object",

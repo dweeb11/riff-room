@@ -27,8 +27,8 @@ def riff_new_board(args, session_id=None, **_):
     b = store.boards().create(args.get("topic"), args.get("buckets"), session_id=session_id)
     return {"board_id": b["id"], "topic": b["topic"], "buckets": b["buckets"],
             "next": ("Tell the user the board is in the riff-room pane; they press Start there to begin a "
-                     "timed burst. Their ideas go in the pane's note field (Enter adds one), not in chat; "
-                     "chat is for talking it over.")}
+                     "timed burst. Their ideas go in the pane's note field, which opens during a burst "
+                     "(Enter adds one), not in chat; chat is for talking it over.")}
 
 
 @_handler

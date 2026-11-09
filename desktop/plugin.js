@@ -498,22 +498,42 @@ function Section({ b, title, bucket, notes, hint }) {
   })
 }
 
-// The user's note field. `fresh` = they have no note on this board yet: until their first one
-// lands, the pane explains notes vs chat (between bursts) or rings the field (during a burst).
-// Closed until the board's first Start, so the first ideas land in a timed, face-down burst.
+// The user's note field. It is open only during a burst, so ideas land timed and face-down.
+// If a draft is in progress when the burst ends (timer or End), the field stays open for that
+// one idea, with Add / Discard; either closes it. `fresh` = the user has no note on this board
+// yet: until their first one lands, the pane explains notes vs chat (between bursts) or rings the
+// field (during a burst).
 function Composer({ b, running, fresh }) {
-  const started = (b.rounds?.length ?? 0) > 0
   const [text, setText] = useState('')
+  const [late, setLate] = useState(false) // a draft caught by the end of the burst
+  const [wasRunning, setWasRunning] = useState(running)
   const box = useRef(null)
   useFocusRequest(box)
   useGlow(box, running && fresh)
+  // Decided during render, not in an effect: a disabled field for even one commit would blur it
+  // and drop the caret out of the idea being typed.
+  if (wasRunning !== running) {
+    setWasRunning(running)
+    setLate(!running && !!text.trim())
+  }
+  const finishing = late && !running
+  const open = running || finishing
   const send = async () => {
     const t = text.trim()
     if (!t) return
     setText('') // a second Enter before the reply finds an empty field, so one press adds one note
     const res = await call(`/board/${b.id}/notes`, 'Note not added', { body: { text: t } })
-    if (res) put(res.board)
-    else setText(t)
+    if (res) {
+      put(res.board)
+      setLate(false)
+    } else {
+      setText(t)
+      setLate(true) // keep a failed note editable even if the burst ended meanwhile
+    }
+  }
+  const discard = () => {
+    setText('')
+    setLate(false)
   }
   return jsxs('div', {
     className: 'flex flex-col gap-2 p-3',
@@ -525,11 +545,11 @@ function Composer({ b, running, fresh }) {
           jsx('span', { className: 'font-medium', children: 'Your ideas' }),
           jsx('div', { style: { flex: 1 } }),
           jsx('span', {
-            style: running ? { color: 'var(--ui-text-secondary)' } : muted,
+            style: open ? { color: 'var(--ui-text-secondary)' } : muted,
             children: running
               ? 'Enter adds a note · hidden from Hermes until the flip'
-              : started
-                ? 'Enter adds a note'
+              : finishing
+                ? 'Time’s up: add this last idea?'
                 : 'Opens when you press Start'
           })
         ]
@@ -542,8 +562,8 @@ function Composer({ b, running, fresh }) {
           jsx(Input, {
             value: text,
             maxLength: NOTE_MAX,
-            disabled: !started,
-            placeholder: running ? 'Type an idea, press Enter' : started ? 'Add a note, press Enter' : 'Press Start to begin',
+            disabled: !open,
+            placeholder: open ? 'Type an idea, press Enter' : 'Press Start for a burst',
             onChange: e => setText(e.target.value),
             onKeyDown: e => {
               if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
@@ -555,7 +575,15 @@ function Composer({ b, running, fresh }) {
           text.length > 100 && jsx('span', { className: 'text-xs', style: muted, children: NOTE_MAX - text.length })
         ]
       }),
-      !running &&
+      finishing &&
+        jsxs('div', {
+          className: 'flex items-center gap-2',
+          children: [
+            jsx(Button, { size: 'xs', disabled: !text.trim(), onClick: send, children: 'Add note' }),
+            jsx(Button, { size: 'xs', variant: 'ghost', onClick: discard, children: 'Discard' })
+          ]
+        }),
+      !open &&
         fresh &&
         jsx('div', {
           className: 'text-xs',
@@ -565,9 +593,8 @@ function Composer({ b, running, fresh }) {
             borderRadius: 6,
             background: 'color-mix(in srgb, var(--ui-accent) 7%, transparent)'
           },
-          children: started
-            ? 'Put your ideas here, one per note, not in chat. Chat is for talking it over.'
-            : 'Press Start for a timed burst, then put your ideas here, one per note, not in chat. They stay face-down, hidden from Hermes until the flip, so neither of you anchors on the other. Chat is for talking it over.'
+          children:
+            'Press Start for a timed burst, then put your ideas here, one per note, not in chat. They stay face-down, hidden from Hermes until the flip, so neither of you anchors on the other. Chat is for talking it over.'
         })
     ]
   })
