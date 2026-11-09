@@ -500,7 +500,9 @@ function Section({ b, title, bucket, notes, hint }) {
 
 // The user's note field. `fresh` = they have no note on this board yet: until their first one
 // lands, the pane explains notes vs chat (between bursts) or rings the field (during a burst).
+// Closed until the board's first Start, so the first ideas land in a timed, face-down burst.
 function Composer({ b, running, fresh }) {
+  const started = (b.rounds?.length ?? 0) > 0
   const [text, setText] = useState('')
   const box = useRef(null)
   useFocusRequest(box)
@@ -524,7 +526,11 @@ function Composer({ b, running, fresh }) {
           jsx('div', { style: { flex: 1 } }),
           jsx('span', {
             style: running ? { color: 'var(--ui-text-secondary)' } : muted,
-            children: running ? 'Enter adds a note · hidden from Hermes until the flip' : 'Enter adds a note'
+            children: running
+              ? 'Enter adds a note · hidden from Hermes until the flip'
+              : started
+                ? 'Enter adds a note'
+                : 'Opens when you press Start'
           })
         ]
       }),
@@ -536,7 +542,8 @@ function Composer({ b, running, fresh }) {
           jsx(Input, {
             value: text,
             maxLength: NOTE_MAX,
-            placeholder: running ? 'Type an idea, press Enter' : 'Add a note, press Enter',
+            disabled: !started,
+            placeholder: running ? 'Type an idea, press Enter' : started ? 'Add a note, press Enter' : 'Press Start to begin',
             onChange: e => setText(e.target.value),
             onKeyDown: e => {
               if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
@@ -558,8 +565,9 @@ function Composer({ b, running, fresh }) {
             borderRadius: 6,
             background: 'color-mix(in srgb, var(--ui-accent) 7%, transparent)'
           },
-          children:
-            'Put your ideas here, one per note, not in chat. During a burst they stay face-down, hidden from Hermes until the flip, so neither of you anchors on the other. Chat is for talking it over.'
+          children: started
+            ? 'Put your ideas here, one per note, not in chat. Chat is for talking it over.'
+            : 'Press Start for a timed burst, then put your ideas here, one per note, not in chat. They stay face-down, hidden from Hermes until the flip, so neither of you anchors on the other. Chat is for talking it over.'
         })
     ]
   })
