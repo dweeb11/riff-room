@@ -15,4 +15,5 @@ provides_tools:
   - riff_sort
   - riff_reel_in
   - riff_export
-provides_hooks: []
+provides_hooks:
+  - pre_llm_call

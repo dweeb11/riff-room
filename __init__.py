@@ -15,3 +15,4 @@ _TOOLS = [
 def register(ctx):
     for schema, handler in _TOOLS:
         ctx.register_tool(name=schema["name"], toolset="riff_room", schema=schema, handler=handler)
+    ctx.register_hook("pre_llm_call", tools.on_pre_llm_call)

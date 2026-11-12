@@ -1,4 +1,4 @@
-"""Tool handlers. Each returns a JSON string and never raises."""
+"""Tool handlers (each returns a JSON string and never raises) and the pre_llm_call hook."""
 
 import functools
 import json
@@ -66,3 +66,33 @@ def riff_reel_in(args, **_):
 def riff_export(args, **_):
     path, md = store.write_export(args.get("board_id"))
     return {"path": str(path), "chars": len(md)}
+
+
+def on_pre_llm_call(session_id=None, **_):
+    """Before each agent turn: one note per round that flipped since the agent was last told.
+
+    A hook can't start a turn, so this lands on the agent's next turn, whoever starts it. Each flip
+    is told once (claimed as "agent:flip:<n>", apart from the pane's own "flip:<n>" chat message).
+    Reading the board lazy-flips a round whose time ran out with no pane open. Never raises.
+    """
+    try:
+        if not session_id:
+            return None
+        s = store.boards()
+        parts = []
+        for meta in s.list(session_id):
+            b = s.get(meta["id"])
+            r = store.board.current_round(b)
+            key = r and f"agent:flip:{r['n']}"
+            if not r or r["state"] != "flipped" or key in b["announced"]:
+                continue
+            b, claimed = s.claim_announcement(b["id"], key, origin="hook")
+            if claimed:
+                parts.append(
+                    f"[riff-room] Round {r['n']} on board {b['id']} flipped: every note is face-up now. "
+                    "The user stars and drag-sorts in the pane and presses Reel it in when ready. "
+                    "Riff on what flipped.\n" + store.board.summary(b, "agent"))
+        return {"context": "\n\n".join(parts)} if parts else None
+    except Exception:
+        logger.warning("riff-room: pre_llm_call hook failed", exc_info=True)
+        return None
