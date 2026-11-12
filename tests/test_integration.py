@@ -93,6 +93,28 @@ class TestToolsAndRoutes(unittest.TestCase):
         self.assertTrue(changed and all(p["board_id"] == bid for p in changed))
         self.assertEqual([p["version"] for p in changed], sorted({p["version"] for p in changed}))
 
+    def test_flip_hook_tells_the_agent_once(self):
+        hook = self.pkg.tools.on_pre_llm_call
+        bid = self.tool("riff_new_board", {"topic": "hooks"}, session_id="local-s1")["board_id"]
+        self.assertIsNone(hook(session_id="local-s1"), "no round yet")
+        self.http("POST", f"/board/{bid}/round/start", json={"duration_s": 60})
+        self.http("POST", f"/board/{bid}/notes", json={"text": "USER IDEA"})
+        self.assertIsNone(hook(session_id="local-s1"), "running round: nothing to tell")
+        self.http("POST", f"/board/{bid}/flip")
+
+        self.assertIsNone(hook(session_id="local-other"), "other sessions hear nothing")
+        ctx = hook(session_id="local-s1")["context"]
+        self.assertIn(f"Round 1 on board {bid} flipped", ctx)
+        self.assertIn("USER IDEA", ctx, "the face-up board comes with it")
+        self.assertIsNone(hook(session_id="local-s1"), "told once")
+        self.assertIsNone(hook(), "no session id")
+
+        self.http("POST", f"/board/{bid}/round/start", json={"duration_s": 60})
+        self.http("POST", f"/board/{bid}/notes", json={"text": "SECOND SECRET"})
+        self.assertIsNone(hook(session_id="local-s1"))
+        self.http("POST", f"/board/{bid}/flip")
+        self.assertIn("Round 2", hook(session_id="local-s1")["context"])
+
     def test_pane_note_is_one_user_note(self):
         bid = self.tool("riff_new_board", {"topic": "entry"}, session_id="local-s1")["board_id"]
         self.http("POST", f"/board/{bid}/round/start", json={"duration_s": 60})
