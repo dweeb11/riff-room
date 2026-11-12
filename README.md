@@ -2,6 +2,8 @@
 
 **Timed brainstorm rounds with Hermes as a teammate.**
 
+[![Demo: burst, flip, and reel-in map](docs/media/riff-room-demo-preview.gif)](docs/media/riff-room-demo.mp4)
+
 Doing solo development, I miss the feeling of getting in to a brainstorm room with that pressure and excitement so I thought about instead of plan mode maybe try brainstorming.  You and Hermes both write sticky notes during a short timed burst. Notes stay face-down, so neither of you sees the other's ideas until the timer runs out. Then everything flips at once, and you sort, star and riff on what came up. When you're done, Hermes "reels it in": a map of the ideas, the ones with the most heat, and one concrete next step.
 
 ## How a round goes
@@ -10,7 +12,13 @@ Doing solo development, I miss the feeling of getting in to a brainstorm room wi
 2. **Burst.** Pick a length (1, 3 or 5 minutes) and press **Start**. The board moves above the chat. Type ideas into the note field, one per note, Enter to add. Hermes's card backs drop onto the board as it writes.
 3. **Flip.** At time's up a chime plays and every card turns face-up.
 4. **Sort and riff.** Star the ideas you like, drag them into buckets, and talk it over in chat. Hermes is told the round flipped and riffs on what came up, building on notes and parking the ones that lost energy. Run another burst whenever you want more.
+
+   ![Sorted board with starred notes and Hermes riffing in chat](docs/media/sorted-board.png)
+
 5. **Reel it in.** Press **Reel it in**. Hermes groups the notes into named clusters, picks the hottest ones and proposes one next step. The map shows in the pane, and you can switch between the map and the board.
+
+   ![Reel it in map with Most heat cards and named clusters](docs/media/reel-in-map.png)
+
 6. **Take it with you.** Export the board as Markdown. It's saved to disk and copied to your clipboard.
 
 ## Why face-down
